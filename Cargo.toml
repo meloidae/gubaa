@@ -1,0 +1,11 @@
+[package]
+
+name = "gba_emu"
+version = "0.0.1"
+authors = [ "meloidae <meloidaee@gmail.com>" ]
+
+[dependencies]
+
+rand="0.3.0"
+num-traits = {version = "*", default-features = false}
+enum-primitive-derive = "0.1.2"
