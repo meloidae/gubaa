@@ -197,20 +197,7 @@ pub fn set_nz(arm: &mut ArmCore, value: u32) {
 }
 
 #[inline(always)]
-pub fn add_set_vc(arm: &mut ArmCore, a: u32, b: u32) {
-    arm.cpsr.v = (a as i32).overflowing_add(b as i32).1;
-    arm.cpsr.c = a.overflowing_add(b).1;
-}
-
-#[inline(always)]
-pub fn adc_set_vc(arm: &mut ArmCore, a: u32, b: u32) {
-    let (res, v1) = (b as i32).overflowing_add(arm.cpsr.c as i32);
-    let (_, v2) = (a as i32).overflowing_add(res);
-    arm.cpsr.v = v1 | v2;
-}
-
-#[inline(always)]
-pub fn sub_set_vc(arm: &mut ArmCore, a: u32, b: u32) {
-    arm.cpsr.v = (a as i32).overflowing_sub(b as i32).1;
-    arm.cpsr.c = a.overflowing_sub(b).1;
+pub fn set_nz_long(arm: &mut ArmCore, value: u64) {
+    arm.cpsr.n = value >> 63 != 0;
+    arm.cpsr.z = value == 0;
 }

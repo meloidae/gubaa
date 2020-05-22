@@ -56,7 +56,7 @@ const BANK_COUNT: usize = 6;
 
 struct Pipeline {
     fetch_type: Access,
-    opcode: [u32; 2],
+    ins: [u32; 2],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -104,14 +104,28 @@ impl From<StatusRegister> for u32 {
     }
 }
 
+pub const REG_SP: usize = 13;
+pub const REG_LR: usize = 14;
+pub const REG_PC: usize = 15;
+
 pub struct ArmCore {
     regs: [u32; 16],
     banks: [[u32; BANK_COUNT]; 7],
     cpsr: StatusRegister,
     spsrs: [StatusRegister; BANK_COUNT],
+    pipe: Pipeline,
 }
 
 impl ArmCore {
+    fn run(&mut self) {
+        let ins = self.pipe.ins[0];
+        if self.cpsr.thumb_state {
+            // thumb
+        } else {
+            // arm
+        }
+    }
+
     fn check_condition(&self, cond: Condition) -> bool {
         match cond {
             Condition::Eq => self.cpsr.z,

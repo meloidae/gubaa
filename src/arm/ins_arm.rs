@@ -1,7 +1,7 @@
-use super::{Condition, ArmCore};
+use super::{Condition, ArmCore, REG_PC};
 
 use crate::arm::common::{lsl_carry, lsl_no_carry, lsr_carry, lsr_no_carry, asr_carry, asr_no_carry,
-    ror_carry, ror_no_carry, and, eor, add, adc, sub, sbc, orr, mov, bic, mvn};
+    ror_carry, ror_no_carry, and, eor, add, adc, sub, sbc, orr, mov, bic, mvn, set_nz, set_nz_long};
 
 use num_traits::FromPrimitive;
 
@@ -102,35 +102,34 @@ fn data_processing(arm: &mut ArmCore, ins: ArmIns) {
     let op_code = ins.slice(21, 25);
     let rn_idx = ins.reg(16);
     let rd_idx = ins.reg(12);
-    let imm_flag = ins.flag(25);
-    let cond_flag = ins.flag(20);
+    let imm = ins.flag(25);
+    let set_flags = ins.flag(20);
 
     let op1 = arm.regs[rn_idx];
-    let op2 = if imm_flag {
-        get_rotated_immediate(arm, ins, cond_flag)
+    let op2 = if imm {
+        get_rotated_immediate(arm, ins, set_flags)
     } else {
-        get_shifted_register(arm, ins, cond_flag)
+        get_shifted_register(arm, ins, set_flags)
     };
 
-
-    if rd_idx == 15 && cond_flag {
+    if rd_idx == REG_PC && set_flags {
 
     }
 
     // Calculate result of operation
     let result = match op_code {
-        AND | TST => and(arm, op1, op2, cond_flag),
-        EOR | TEQ => eor(arm, op1, op2, cond_flag),
-        SUB | CMP => sub(arm, op1, op2, cond_flag),
-        RSB => sub(arm, op2, op1, cond_flag),
-        ADD | CMN => add(arm, op1, op2, cond_flag),
-        ADC => adc(arm, op1, op2, cond_flag),
-        SBC => sbc(arm, op1, op2, cond_flag),
-        RSC => sbc(arm, op2, op1, cond_flag),
-        ORR => orr(arm, op1, op2, cond_flag),
-        MOV => mov(arm, op1, op2, cond_flag),
-        BIC => bic(arm, op1, op2, cond_flag),
-        MVN => mvn(arm, op1, op2, cond_flag),
+        AND | TST => and(arm, op1, op2, set_flags),
+        EOR | TEQ => eor(arm, op1, op2, set_flags),
+        SUB | CMP => sub(arm, op1, op2, set_flags),
+        RSB => sub(arm, op2, op1, set_flags),
+        ADD | CMN => add(arm, op1, op2, set_flags),
+        ADC => adc(arm, op1, op2, set_flags),
+        SBC => sbc(arm, op1, op2, set_flags),
+        RSC => sbc(arm, op2, op1, set_flags),
+        ORR => orr(arm, op1, op2, set_flags),
+        MOV => mov(arm, op1, op2, set_flags),
+        BIC => bic(arm, op1, op2, set_flags),
+        MVN => mvn(arm, op1, op2, set_flags),
         _ => unreachable!(),
     };
 
@@ -142,4 +141,85 @@ fn data_processing(arm: &mut ArmCore, ins: ArmIns) {
 }
 
 fn multiply(arm: &mut ArmCore, ins: ArmIns) {
+    let rd_idx = ins.reg(16);
+    let rn_idx = ins.reg(12);
+    let rs_idx = ins.reg(8);
+    let rm_idx = ins.reg(0);
+
+    let set_flags = ins.flag(20);
+    let acc = ins.flag(21);
+    
+    // restrictions on operand registers
+    assert!(rd_idx != rm_idx);
+    assert!(rd_idx != REG_PC);
+    assert!(rs_idx != REG_PC);
+    assert!(rn_idx != REG_PC);
+    assert!(rm_idx != REG_PC);
+
+    let rn = arm.regs[rn_idx];
+    let rs = arm.regs[rs_idx];
+    let rm = arm.regs[rm_idx];
+    let result = if acc {
+        // TODO: add cycles for accumulation
+        rm.wrapping_mul(rs).wrapping_add(rn)
+    } else {
+        rm.wrapping_mul(rs)
+    };
+
+    if set_flags {
+        // c is set to a meaningless value, v is unaffected
+        set_nz(arm, result);
+    }
+
+}
+
+fn multiply_long(arm: &mut ArmCore, ins: ArmIns) {
+    let rdhi_idx = ins.reg(16);
+    let rdlo_idx = ins.reg(12);
+    let rs_idx = ins.reg(8);
+    let rm_idx = ins.reg(0);
+
+    let signed = ins.flag(22);
+    let acc = ins.flag(21);
+    let set_flags = ins.flag(20);
+
+    assert!(rdhi_idx != REG_PC);
+    assert!(rdlo_idx != REG_PC);
+    assert!(rs_idx != REG_PC);
+    assert!(rm_idx != REG_PC);
+    assert!(rdhi_idx != rdlo_idx);
+    assert!(rdhi_idx != rm_idx);
+    assert!(rdlo_idx != rm_idx);
+
+    let result: u64 = if signed {
+        let rm = arm.regs[rm_idx] as i32 as i64;
+        let rs = arm.regs[rs_idx] as i32 as i64;
+        if acc {
+            let rdhi = arm.regs[rdhi_idx] as i32 as i64;
+            let rdlo = arm.regs[rdlo_idx] as i32 as i64;
+            let rdfull = rdlo | (rdhi << 32);
+            rm.wrapping_mul(rs).wrapping_add(rdfull) as u64
+        } else {
+            rm.wrapping_mul(rs) as u64
+        }
+    } else {
+        let rm = arm.regs[rm_idx] as u64;
+        let rs = arm.regs[rs_idx] as u64;
+        if acc {
+            let rdhi = arm.regs[rdhi_idx] as u64;
+            let rdlo = arm.regs[rdlo_idx] as u64;
+            let rdfull = rdlo | (rdhi << 32);
+            rm.wrapping_mul(rs).wrapping_add(rdfull)
+        } else {
+            rm.wrapping_mul(rs)
+        }
+    };
+
+    if set_flags {
+        // c and v are set to meaningless values
+        set_nz_long(arm, result);
+    }
+
+    arm.regs[rdhi_idx] = (result >> 32) as u32;
+    arm.regs[rdlo_idx] = result as u32;
 }
