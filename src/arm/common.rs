@@ -2,56 +2,193 @@ use super::{ArmCore};
 
 
 // logical shift left and return (shifted_val, carry)
-pub fn shift_lsl(arm: &ArmCore, rm: u32, shift: u32) -> (u32, bool) {
+pub fn lsl_carry(arm: &mut ArmCore, rm: u32, shift: u32) -> u32 {
     if shift == 32 {
-        (0, (rm & 1) != 0)
+        arm.cpsr.c = (rm & 1) != 0;
+        0
     } else if shift > 32 {
-        (0, false)
+        arm.cpsr.c = false;
+        0
+    } else if shift != 0{
+        arm.cpsr.c = ((rm >> (shift - 1)) & 1) != 0;
+        rm << shift
+    } else {  // no
+        rm
+    }
+}
+
+pub fn lsl_no_carry(_arm: &ArmCore, rm: u32, shift: u32) -> u32 {
+    if shift >= 32 {
+        0
+    } else if shift != 0 {
+        rm << shift
     } else {
-        if shift != 0 {
-            (rm << shift, ((rm >> (shift - 1)) & 1) != 0)
-        } else {
-            (rm, arm.cpsr.c)
-        }
+        rm
     }
 }
 
 // logical shift right and return (shifted_val, carry)
-pub fn shift_lsr(arm: &ArmCore, rm: u32, shift: u32) -> (u32, bool) {
+pub fn lsr_carry(arm: &mut ArmCore, rm: u32, shift: u32) -> u32 {
     if shift == 32 || shift == 0 {
-        (0, (rm >> 31) != 0)
+        arm.cpsr.c = (rm >> 31) != 0;
+        0
     } else if shift > 32 {
-        (0, false)
+        arm.cpsr.c = false;
+        0
     } else {
-        (rm >> shift, ((rm >> (shift - 1)) & 1) != 0)
+        arm.cpsr.c = ((rm >> (shift - 1)) & 1) != 0;
+        rm >> shift
+    }
+}
+
+pub fn lsr_no_carry(_arm: &ArmCore, rm: u32, shift: u32) -> u32 {
+    if shift >= 32 || shift == 0 {
+        0
+    } else {
+        rm >> shift
     }
 }
 
 // arithematic shift right and return (shifted_val, carry)
-pub fn shift_asr(arm: &ArmCore, rm: u32, shift: u32) -> (u32, bool) {
+pub fn asr_carry(arm: &mut ArmCore, rm: u32, shift: u32) -> u32 {
     if shift >= 32 || shift == 0 {
         if (rm >> 31) != 0 {
-            (0xffff_ffff, true)
+            arm.cpsr.c = true;
+            0xffff_ffff
         } else {
-            (0, false)
+            arm.cpsr.c = false;
+            0
         }
     } else {
-        let carry = (((rm as i32) >> (shift - 1)) & 1) != 0;
-        (((rm as i32) >> shift) as u32, carry)
+        arm.cpsr.c = (((rm as i32) >> (shift - 1)) & 1) != 0;
+        ((rm as i32) >> shift) as u32
+    }
+}
+
+pub fn asr_no_carry(_arm: &ArmCore, rm: u32, shift: u32) -> u32 {
+    if shift >= 32 || shift == 0 {
+        if (rm >> 31) != 0 {
+            0xffff_ffff
+        } else {
+            0
+        }
+    } else {
+        ((rm as i32) >> shift) as u32
     }
 }
 
 // rotate right and return (shifted_val, carry)
-pub fn shift_ror(arm: &ArmCore, rm: u32, shift: u32) -> (u32, bool) {
+pub fn ror_carry(arm: &mut ArmCore, rm: u32, shift: u32) -> u32 {
     if shift == 0 { // rrx
         let carry_in = arm.cpsr.c as u32;
-        ((rm >> 1) | (carry_in << 31), (rm & 1) != 0)
+        arm.cpsr.c = (rm & 1) != 0;
+        (rm >> 1) | (carry_in << 31)
     } else {
-        let carry = ((rm >> ((shift - 1) & 0x1f)) & 1) != 0;
-        (rm.rotate_right(shift), carry)
+        arm.cpsr.c = ((rm >> ((shift - 1) & 0x1f)) & 1) != 0;
+        rm.rotate_right(shift)
     }
 }
 
+pub fn ror_no_carry(arm: &ArmCore, rm: u32, shift: u32) -> u32 {
+    if shift == 0 { // rrx
+        (rm >> 1) | ((arm.cpsr.c as u32) << 31)
+    } else {
+        rm.rotate_right(shift)
+    }
+}
+
+pub fn and(arm: &mut ArmCore, op1: u32, op2: u32, set_flag: bool) -> u32 {
+    let result = op1 & op2;
+    if set_flag {
+        set_nz(arm, result);
+    }
+    result
+}
+
+pub fn eor(arm: &mut ArmCore, op1: u32, op2: u32, set_flag: bool) -> u32 {
+    let result = op1 ^ op2;
+    if set_flag {
+        set_nz(arm, result);
+    }
+    result
+}
+
+pub fn add(arm: &mut ArmCore, op1: u32, op2: u32, set_flag: bool) -> u32 {
+    let (result, carry) = op1.overflowing_add(op2);
+    if set_flag {
+        arm.cpsr.v = (op1 as i32).overflowing_add(op2 as i32).1;
+        arm.cpsr.c = carry;
+        set_nz(arm, result);
+    }
+    result
+}
+
+pub fn adc(arm: &mut ArmCore, op1: u32, op2: u32, set_flag: bool) -> u32 {
+    let (result1, c1) = op2.overflowing_add(arm.cpsr.c as u32);
+    let (result2, c2) = op1.overflowing_add(result1);
+    if set_flag {
+        let (s_result1, v1) = (op2 as i32).overflowing_add(arm.cpsr.c as i32);
+        let (_, v2) = (op1 as i32).overflowing_add(s_result1);
+        arm.cpsr.v = v1 | v2;
+        arm.cpsr.c = c1 | c2;
+        set_nz(arm, result2);
+    }
+    result2
+}
+
+pub fn sub(arm: &mut ArmCore, op1: u32, op2: u32, set_flag: bool) -> u32 {
+    let (result, carry) = op1.overflowing_sub(op2);
+    if set_flag {
+        arm.cpsr.v = (op1 as i32).overflowing_sub(op2 as i32).1;
+        arm.cpsr.c = carry;
+        set_nz(arm, result);
+    }
+    result
+}
+
+pub fn sbc(arm: &mut ArmCore, op1: u32, op2: u32, set_flag: bool) -> u32 {
+    let (result1, c1) = op2.overflowing_add(!arm.cpsr.c as u32);
+    let (result2, c2) = op1.overflowing_sub(result1);
+    if set_flag {
+        let (s_result1, v1) = (op2 as i32).overflowing_add(!arm.cpsr.c as i32);
+        let (_, v2) = (op1 as i32).overflowing_sub(s_result1);
+        arm.cpsr.v = v1 | v2;
+        arm.cpsr.c = c1 | c2;
+        set_nz(arm, result2);
+    }
+    result2
+}
+
+pub fn orr(arm: &mut ArmCore, op1: u32, op2: u32, set_flag: bool) -> u32 {
+    let result = op1 | op2;
+    if set_flag {
+        set_nz(arm, result);
+    }
+    result
+}
+
+pub fn mov(arm: &mut ArmCore, _op1: u32, op2: u32, set_flag: bool) -> u32 {
+    if set_flag {
+        set_nz(arm, op2);
+    }
+    op2
+}
+
+pub fn bic(arm: &mut ArmCore, op1: u32, op2: u32, set_flag: bool) -> u32 {
+    let result = op1 & !op2;
+    if set_flag {
+        set_nz(arm, result);
+    }
+    result
+}
+
+pub fn mvn(arm: &mut ArmCore, _op1: u32, op2: u32, set_flag: bool) -> u32 {
+    let result = !op2;
+    if set_flag {
+        set_nz(arm, result);
+    }
+    result
+}
 
 #[inline(always)]
 pub fn set_nz(arm: &mut ArmCore, value: u32) {
@@ -62,9 +199,18 @@ pub fn set_nz(arm: &mut ArmCore, value: u32) {
 #[inline(always)]
 pub fn add_set_vc(arm: &mut ArmCore, a: u32, b: u32) {
     arm.cpsr.v = (a as i32).overflowing_add(b as i32).1;
+    arm.cpsr.c = a.overflowing_add(b).1;
+}
+
+#[inline(always)]
+pub fn adc_set_vc(arm: &mut ArmCore, a: u32, b: u32) {
+    let (res, v1) = (b as i32).overflowing_add(arm.cpsr.c as i32);
+    let (_, v2) = (a as i32).overflowing_add(res);
+    arm.cpsr.v = v1 | v2;
 }
 
 #[inline(always)]
 pub fn sub_set_vc(arm: &mut ArmCore, a: u32, b: u32) {
     arm.cpsr.v = (a as i32).overflowing_sub(b as i32).1;
+    arm.cpsr.c = a.overflowing_sub(b).1;
 }

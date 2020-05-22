@@ -150,4 +150,8 @@ impl ArmCore {
     fn switch_mode(&mut self, mode: OperatingMode) {
     }
 
+    fn set_reg(&mut self, index: usize, value: u32) {
+        self.regs[index] = value;
+    }
+
 }
