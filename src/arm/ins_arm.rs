@@ -31,6 +31,7 @@ impl ArmIns {
     }
 }
 
+pub type ArmFn = fn(&mut ArmCore, ArmIns);
 
 fn get_rotated_immediate(arm: &mut ArmCore, ins: ArmIns, set_carry: bool) -> u32 {
     let value = ins.slice(0, 8);
@@ -71,14 +72,6 @@ fn get_shifted_register(arm: &mut ArmCore, ins: ArmIns, set_carry: bool) -> u32 
         (ROR, false) => ror_no_carry(arm, rm_value, shift),
         _ => unreachable!()
     }
-}
-
-// TODO
-fn branch_and_exchange(arm: &mut ArmCore, ins: ArmIns) {
-    let address = arm.regs[ins.reg(0)];
-    // if address & 0x1 {
-    // } else {
-    // }
 }
 
 fn data_processing(arm: &mut ArmCore, ins: ArmIns) {
@@ -223,3 +216,115 @@ fn multiply_long(arm: &mut ArmCore, ins: ArmIns) {
     arm.regs[rdhi_idx] = (result >> 32) as u32;
     arm.regs[rdlo_idx] = result as u32;
 }
+
+fn single_data_swap(arm: &mut ArmCore, ins: ArmIns) {
+}
+
+// TODO
+fn branch_and_exchange(arm: &mut ArmCore, ins: ArmIns) {
+    let address = arm.regs[ins.reg(0)];
+    // if address & 0x1 {
+    // } else {
+    // }
+}
+
+fn halfword_data_transfer(arm: &mut ArmCore, ins: ArmIns) {
+}
+
+
+fn single_data_transfer(arm: &mut ArmCore, ins: ArmIns) {
+    let rd_idx = ins.reg(12);
+    let rn_idx = ins.reg(16);
+
+    let imm = !ins.flag(25);
+    let preindex = ins.flag(24);
+    let up = ins.flag(23);
+    let byte = ins.flag(22);
+    let writeback = ins.flag(21);
+    let load = ins.flag(20);
+
+    let offset = if imm {
+        ins.slice(0, 12)
+    } else {
+        get_shifted_register(arm, ins, false)
+    };
+}
+
+fn block_data_transfer(arm: &mut ArmCore, ins: ArmIns) {
+}
+
+fn branch(arm: &mut ArmCore, ins: ArmIns) {
+}
+
+fn software_interrupt(arm: &mut ArmCore, ins: ArmIns) {
+}
+
+pub static ARM_INS_TABLE: &[(&str, &str, ArmFn)] = &[
+
+    ("000 0000 S nnnn dddd iiii 0ii1 iiii", "AND<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 0000 S nnnn dddd iiii iii0 iiii", "AND<S> %Rn, %Rd, <op2>", data_processing),
+    ("001 0000 S nnnn dddd iiii iiii iiii", "AND<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 0001 S nnnn dddd iiii 0ii1 iiii", "EOR<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 0001 S nnnn dddd iiii iii0 iiii", "EOR<S> %Rn, %Rd, <op2>", data_processing),
+    ("001 0001 S nnnn dddd iiii iiii iiii", "EOR<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 0010 S nnnn dddd iiii 0ii1 iiii", "SUB<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 0010 S nnnn dddd iiii iii0 iiii", "SUB<S> %Rn, %Rd, <op2>", data_processing),
+    ("001 0010 S nnnn dddd iiii iiii iiii", "SUB<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 0011 S nnnn dddd iiii 0ii1 iiii", "RSB<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 0011 S nnnn dddd iiii iii0 iiii", "RSB<S> %Rn, %Rd, <op2>", data_processing),
+    ("001 0011 S nnnn dddd iiii iiii iiii", "RSB<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 0100 S nnnn dddd iiii 0ii1 iiii", "ADD<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 0100 S nnnn dddd iiii iii0 iiii", "ADD<S> %Rn, %Rd, <op2>", data_processing),
+    ("001 0100 S nnnn dddd iiii iiii iiii", "ADD<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 0101 S nnnn dddd iiii 0ii1 iiii", "ADC<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 0101 S nnnn dddd iiii iii0 iiii", "ADC<S> %Rn, %Rd, <op2>", data_processing),
+    ("001 0101 S nnnn dddd iiii iiii iiii", "ADC<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 0110 S nnnn dddd iiii 0ii1 iiii", "SBC<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 0110 S nnnn dddd iiii iii0 iiii", "SBC<S> %Rn, %Rd, <op2>", data_processing),
+    ("001 0110 S nnnn dddd iiii iiii iiii", "SBC<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 0111 S nnnn dddd iiii 0ii1 iiii", "RSC<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 0111 S nnnn dddd iiii iii0 iiii", "RSC<S> %Rn, %Rd, <op2>", data_processing),
+    ("001 0111 S nnnn dddd iiii iiii iiii", "RSC<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 1000 S nnnn dddd iiii 0ii1 iiii", "TST %Rn, %Rd, <op2>", data_processing),
+    ("000 1000 S nnnn dddd iiii iii0 iiii", "TST %Rn, %Rd, <op2>", data_processing),
+    ("001 1000 S nnnn dddd iiii iiii iiii", "TST %Rn, %Rd, <op2>", data_processing),
+    ("000 1001 S nnnn dddd iiii 0ii1 iiii", "TEQ %Rn, %Rd, <op2>", data_processing),
+    ("000 1001 S nnnn dddd iiii iii0 iiii", "TEQ %Rn, %Rd, <op2>", data_processing),
+    ("001 1001 S nnnn dddd iiii iiii iiii", "TEQ %Rn, %Rd, <op2>", data_processing),
+    ("000 1010 S nnnn dddd iiii 0ii1 iiii", "CMP %Rn, %Rd, <op2>", data_processing),
+    ("000 1010 S nnnn dddd iiii iii0 iiii", "CMP %Rn, %Rd, <op2>", data_processing),
+    ("001 1010 S nnnn dddd iiii iiii iiii", "CMP %Rn, %Rd, <op2>", data_processing),
+    ("000 1011 S nnnn dddd iiii 0ii1 iiii", "CMN %Rn, %Rd, <op2>", data_processing),
+    ("000 1011 S nnnn dddd iiii iii0 iiii", "CMN %Rn, %Rd, <op2>", data_processing),
+    ("001 1011 S nnnn dddd iiii iiii iiii", "CMN %Rn, %Rd, <op2>", data_processing),
+    ("000 1100 S nnnn dddd iiii 0ii1 iiii", "ORR<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 1100 S nnnn dddd iiii iii0 iiii", "ORR<S> %Rn, %Rd, <op2>", data_processing),
+    ("001 1100 S nnnn dddd iiii iiii iiii", "ORR<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 1101 S nnnn dddd iiii 0ii1 iiii", "MOV<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 1101 S nnnn dddd iiii iii0 iiii", "MOV<S> %Rn, %Rd, <op2>", data_processing),
+    ("001 1101 S nnnn dddd iiii iiii iiii", "MOV<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 1110 S nnnn dddd iiii 0ii1 iiii", "BIC<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 1110 S nnnn dddd iiii iii0 iiii", "BIC<S> %Rn, %Rd, <op2>", data_processing),
+    ("001 1110 S nnnn dddd iiii iiii iiii", "BIC<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 1111 S nnnn dddd iiii 0ii1 iiii", "MVN<S> %Rn, %Rd, <op2>", data_processing),
+    ("000 1111 S nnnn dddd iiii iii0 iiii", "MVN<S> %Rn, %Rd, <op2>", data_processing),
+    ("001 1111 S nnnn dddd iiii iiii iiii", "MVN<S> %Rn, %Rd, <op2>", data_processing),
+
+    ("0000 000S dddd nnnn ssss 1001 mmmm", "MUL<S> %Rd, %Rm, %Rs", multiply),
+    ("0000 001S dddd nnnn ssss 1001 mmmm", "MLA<S> %Rd, %Rm, %Rs, %Rn", multiply),
+
+    ("0000 100S hhhh llll ssss 1001 mmmm", "UMULL<S> %Rl, %Rh, %Rm, %Rs", multiply_long),
+    ("0000 101S hhhh llll ssss 1001 mmmm", "UMLAL<S> %Rl, %Rh, %Rm, %Rs", multiply_long),
+    ("0000 110S hhhh llll ssss 1001 mmmm", "SMULL<S> %Rl, %Rh, %Rm, %Rs", multiply_long),
+    ("0000 111S hhhh llll ssss 1001 mmmm", "SMLAL<S> %Rl, %Rh, %Rm, %Rs", multiply_long),
+
+    ("0001 0000 nnnn dddd 0000 1001 mmmm", "SWP %Rd, %Rm [%Rn]", single_data_swap),
+    ("0001 0100 nnnn dddd 0000 1001 mmmm", "SWPB %Rd, %Rm [%Rn]", single_data_swap),
+
+    ("0001 0010 1111 1111 1111 0001 nnnn", "BX %Rn", branch_and_exchange),
+
+    ("000P U0W1 nnnn dddd 0000 1011 mmmm", "LDRH %Rd, [%Rn, %Rm]", halfword_data_transfer),
+    ("000P U0W1 nnnn dddd 0000 1101 mmmm", "LDRSB %Rd, [%Rn, %Rm]", halfword_data_transfer),
+    ("000P U0W1 nnnn dddd 0000 1111 mmmm", "LDRSH %Rd, [%Rn, %Rm]", halfword_data_transfer),
+
+];
