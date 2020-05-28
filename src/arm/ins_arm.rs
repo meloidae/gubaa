@@ -1,7 +1,8 @@
 use super::{Condition, ArmCore, REG_PC};
 
 use crate::arm::common::{lsl_carry, lsl_no_carry, lsr_carry, lsr_no_carry, asr_carry, asr_no_carry,
-    ror_carry, ror_no_carry, and, eor, add, adc, sub, sbc, orr, mov, bic, mvn, set_nz, set_nz_long};
+    ror_carry, ror_no_carry, and, eor, add, adc, sub, sbc, orr, mov, bic, mvn, set_nz, set_nz_long,
+    process_bit_format, specs_matches, IndexBitPair};
 
 use num_traits::FromPrimitive;
 
@@ -28,6 +29,10 @@ impl ArmIns {
 
     fn cond(&self) -> Condition {
         Condition::from_u32(self.slice(28, 32)).unwrap()
+    }
+
+    pub fn discriminant(&self) -> u32 {
+        self.slice(4, 8) | self.slice(20, 28) << 4
     }
 }
 
@@ -259,7 +264,54 @@ fn branch(arm: &mut ArmCore, ins: ArmIns) {
 fn software_interrupt(arm: &mut ArmCore, ins: ArmIns) {
 }
 
-pub static ARM_INS_TABLE: &[(&str, &str, ArmFn)] = &[
+fn undefined(arm: &mut ArmCore, ins: ArmIns) {
+}
+
+pub struct ArmLookupTable {
+    disc2idx: Vec<u8>,
+    idx2fn: Vec<ArmFn>,
+}
+
+struct ArmSpecs(Vec<IndexBitPair>, ArmFn);
+
+impl ArmSpecs {
+    fn try_match_discriminant(&self, disc: u32) -> Option<ArmFn> {
+        if specs_matches(&self.0, disc) {
+            Some(self.1)
+        } else {
+            None
+        }
+    }
+}
+
+impl ArmLookupTable {
+    fn compute() -> ArmLookupTable {
+        let arm_specs_table = ARM_PATTERN_TABLE.iter()
+            .map(|&(fmt, _, arm_fn)| process_arm_format(fmt, arm_fn))
+            .collect::<Vec<ArmSpecs>>();
+
+        let mut arm_fns = Vec::<ArmFn>::new();
+        let disc2idx = (0..=0xFFF).map(|disc| {
+            let specs_matches = arm_specs_table.iter()
+                .filter_map(|s| s.try_match_discriminant(disc))
+                .collect::<Vec<ArmFn>>();
+            // TODO
+            // let specs: ArmFn = match specs_matches.len() {
+            //     0 => Ok(undefined),
+            //     1 => Ok(specs_matches[0]),
+            //     _ => Err(err(format!("More than 1 matching specs for discriminant {:03X}", disc))),
+            // }?;
+        });
+        // TODO
+        ArmLookupTable{ disc2idx: vec![0u8], idx2fn: vec![data_processing]}
+    }
+}
+
+fn process_arm_format(fmt: &str, arm_fn: ArmFn) -> ArmSpecs {
+    ArmSpecs(process_bit_format(fmt, |i| (4 <= i && i < 8) || (20 <= i && i < 28)), arm_fn)
+}
+
+pub static ARM_PATTERN_TABLE: &[(&str, &str, ArmFn)] = &[
 
     ("000 0000 S nnnn dddd iiii 0ii1 iiii", "AND<S> %Rn, %Rd, <op2>", data_processing),
     ("000 0000 S nnnn dddd iiii iii0 iiii", "AND<S> %Rn, %Rd, <op2>", data_processing),
@@ -323,8 +375,46 @@ pub static ARM_INS_TABLE: &[(&str, &str, ArmFn)] = &[
 
     ("0001 0010 1111 1111 1111 0001 nnnn", "BX %Rn", branch_and_exchange),
 
-    ("000P U0W1 nnnn dddd 0000 1011 mmmm", "LDRH %Rd, [%Rn, %Rm]", halfword_data_transfer),
-    ("000P U0W1 nnnn dddd 0000 1101 mmmm", "LDRSB %Rd, [%Rn, %Rm]", halfword_data_transfer),
-    ("000P U0W1 nnnn dddd 0000 1111 mmmm", "LDRSH %Rd, [%Rn, %Rm]", halfword_data_transfer),
+    ("000 P U0W1 nnnn dddd 0000 1011 mmmm", "LDRH %Rd, [%Rn, %Rm]", halfword_data_transfer),
+    ("000 P U0W1 nnnn dddd 0000 1101 mmmm", "LDRSB %Rd, [%Rn, %Rm]", halfword_data_transfer),
+    ("000 P U0W1 nnnn dddd 0000 1111 mmmm", "LDRSH %Rd, [%Rn, %Rm]", halfword_data_transfer),
+    ("000 P U0W0 nnnn dddd 0000 1111 mmmm", "STRH %Rd, [%Rn, %Rm]", halfword_data_transfer),
 
+    ("000 P U1W1 nnnn dddd iiii 1011 iiii", "LDRH %Rd, [%Rn, #[i]]", halfword_data_transfer),
+    ("000 P U1W1 nnnn dddd iiii 1101 iiii", "LDRSB %Rd, [%Rn, #[i]]", halfword_data_transfer),
+    ("000 P U1W1 nnnn dddd iiii 1111 iiii", "LDRSH %Rd, [%Rn, #[i]]", halfword_data_transfer),
+    ("000 P U1W0 nnnn dddd iiii 1111 iiii", "STRH %Rd, [%Rn, #[i]]", halfword_data_transfer),
+
+    ("010 P U0W1 nnnn dddd oooo oooo oooo", "LDR %Rd, [%Rn, #offset[i]]", single_data_transfer),
+    ("011 P U0W1 nnnn dddd oooo oooo oooo", "LDR %Rd, [%Rn, <op2_reg>]", single_data_transfer),
+    ("010 P U1W1 nnnn dddd oooo oooo oooo", "LDRB %Rd, [%Rn, #offset[i]]", single_data_transfer),
+    ("011 P U1W1 nnnn dddd oooo oooo oooo", "LDRB %Rd, [%Rn, <op2_reg>]", single_data_transfer),
+
+    ("010 P U0W0 nnnn dddd oooo oooo oooo", "LDR %Rd, [%Rn, #offset[i]]", single_data_transfer),
+    ("011 P U0W0 nnnn dddd oooo oooo oooo", "LDR %Rd, [%Rn, <op2_reg>]", single_data_transfer),
+    ("010 P U1W0 nnnn dddd oooo oooo oooo", "LDRB %Rd, [%Rn, #offset[i]]", single_data_transfer),
+    ("011 P U1W0 nnnn dddd oooo oooo oooo", "LDRB %Rd, [%Rn, <op2_reg>]", single_data_transfer),
+
+    // Shouldn't occur
+    ("011 x xxxx xxxx xxxx xxxx xxx1 xxxx", "Undefined", |_: &mut ArmCore, _: ArmIns| {}),
+    //    P USWL
+    ("100 0 1SW1 nnnn rrrr rrrr rrrr rrrr", "LDMIA<S> %Rn<wb>, { %+Rr }", block_data_transfer),
+    ("100 1 1SW1 nnnn rrrr rrrr rrrr rrrr", "LDMIB<S> %Rn<wb>, { %+Rr }", block_data_transfer),
+    ("100 0 0SW1 nnnn rrrr rrrr rrrr rrrr", "LDMDA<S> %Rn<wb>, { %+Rr }", block_data_transfer),
+    ("100 1 0SW1 nnnn rrrr rrrr rrrr rrrr", "LDMDB<S> %Rn<wb>, { %+Rr }", block_data_transfer),
+
+    ("100 0 1SW0 nnnn rrrr rrrr rrrr rrrr", "STMIA<S> %Rn<wb>, { %+Rr }", block_data_transfer),
+    ("100 1 1SW0 nnnn rrrr rrrr rrrr rrrr", "STMIB<S> %Rn<wb>, { %+Rr }", block_data_transfer),
+    ("100 0 0SW0 nnnn rrrr rrrr rrrr rrrr", "STMDA<S> %Rn<wb>, { %+Rr }", block_data_transfer),
+    ("100 1 0SW0 nnnn rrrr rrrr rrrr rrrr", "STMDB<S> %Rn<wb>, { %+Rr }", block_data_transfer),
+
+    ("101 0 oooo oooo oooo oooo oooo oooo", "B $offset[o]", branch),
+    ("101 1 oooo oooo oooo oooo oooo oooo", "BL $offset[o]", branch),
+
+    // Shouldn't occur
+    ("110P UNWL nnnn dddd #### oooo oooo", "CP_DATA_TRANS*", |_: &mut ArmCore, _: ArmIns| {}),
+    ("1110 cccc nnnn dddd #### ppp0 mmmm", "CP_REG_OP*", |_: &mut ArmCore, _: ArmIns| {}),
+    ("1110 cccL nnnn dddd #### ppp1 mmmm", "CP_DATA_OP*", |_: &mut ArmCore, _: ArmIns| {}),
+
+    ("1111 iiii iiii iiii iiii iiii iiii", "SW #[i]", software_interrupt),
 ];

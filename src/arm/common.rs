@@ -1,5 +1,9 @@
+use std::error;
+
 use super::{ArmCore};
 
+
+pub type DisResult<T> = Result<T, Box<dyn error::Error>>;
 
 // logical shift left and return (shifted_val, carry)
 pub fn lsl_carry(arm: &mut ArmCore, rm: u32, shift: u32) -> u32 {
@@ -200,4 +204,45 @@ pub fn set_nz(arm: &mut ArmCore, value: u32) {
 pub fn set_nz_long(arm: &mut ArmCore, value: u64) {
     arm.cpsr.n = value >> 63 != 0;
     arm.cpsr.z = value == 0;
+}
+
+#[derive(Clone, Copy)]
+pub enum Bit {
+    Any = 0,
+    Zero = 1,
+    One = 2,
+}
+
+pub(super) type IndexBitPair = (usize, Bit);
+
+pub(super) fn process_bit_format(fmt: &str, accept_index: fn(usize) -> bool) -> Vec<IndexBitPair> {
+    fmt.chars()
+        .filter(|&c| !c.is_whitespace())
+        .rev()
+        .enumerate()
+        .filter(|&(i, _)| accept_index(i))
+        .map(|(_, c)| spec_char_to_bit(c))
+        .filter(|&b| match b { Bit::Any => false, _ => true })
+        .enumerate()
+        .collect::<Vec<IndexBitPair>>()
+}
+
+fn spec_char_to_bit(c: char) -> Bit {
+    match c {
+        '0' => Bit::Zero,
+        '1' => Bit::One,
+        _ => Bit::Any,
+    }
+}
+
+pub(super) fn specs_matches(index_bits: &[IndexBitPair], disc: u32) -> bool {
+    for (i, b) in index_bits.iter() {
+        let target = (disc >> i) & 1;
+        match b {
+            Bit::Zero => if target != 0 { return false },
+            Bit::One => if target != 1 { return false },
+            _ => unreachable!(),
+        };
+    }
+    true
 }
