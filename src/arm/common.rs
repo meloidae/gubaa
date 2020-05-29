@@ -4,6 +4,7 @@ use super::{ArmCore};
 
 
 pub type DisResult<T> = Result<T, Box<dyn error::Error>>;
+pub fn err<T: Into<Box<dyn error::Error>>>(t: T) -> Box<dyn error::Error> { t.into() }
 
 // logical shift left and return (shifted_val, carry)
 pub fn lsl_carry(arm: &mut ArmCore, rm: u32, shift: u32) -> u32 {
@@ -221,9 +222,9 @@ pub(super) fn process_bit_format(fmt: &str, accept_index: fn(usize) -> bool) -> 
         .rev()
         .enumerate()
         .filter(|&(i, _)| accept_index(i))
-        .map(|(_, c)| spec_char_to_bit(c))
-        .filter(|&b| match b { Bit::Any => false, _ => true })
+        .map(|(i, c)| spec_char_to_bit(c))
         .enumerate()
+        .filter(|&(_, b)| match b { Bit::Any => false, _ => true })
         .collect::<Vec<IndexBitPair>>()
 }
 

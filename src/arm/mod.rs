@@ -4,7 +4,7 @@ mod ins_arm;
 
 use num_traits::FromPrimitive;
 
-use crate::arm::ins_arm::ArmIns;
+use crate::arm::ins_arm::{ArmIns};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Primitive)]
 pub enum Condition {
@@ -168,4 +168,8 @@ impl ArmCore {
         self.regs[index] = value;
     }
 
+    // // for testing purpose
+    // pub fn get_arm_lookup_table(&self) -> ArmLookupTable {
+    //     ArmLookupTable::compute()
+    // }
 }

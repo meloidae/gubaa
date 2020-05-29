@@ -2,7 +2,7 @@ use super::{Condition, ArmCore, REG_PC};
 
 use crate::arm::common::{lsl_carry, lsl_no_carry, lsr_carry, lsr_no_carry, asr_carry, asr_no_carry,
     ror_carry, ror_no_carry, and, eor, add, adc, sub, sbc, orr, mov, bic, mvn, set_nz, set_nz_long,
-    process_bit_format, specs_matches, IndexBitPair};
+    process_bit_format, specs_matches, err, DisResult, IndexBitPair};
 
 use num_traits::FromPrimitive;
 
@@ -267,48 +267,55 @@ fn software_interrupt(arm: &mut ArmCore, ins: ArmIns) {
 fn undefined(arm: &mut ArmCore, ins: ArmIns) {
 }
 
-pub struct ArmLookupTable {
-    disc2idx: Vec<u8>,
-    idx2fn: Vec<ArmFn>,
-}
+struct ArmSpecs<'a>(Vec<IndexBitPair>, &'a str, ArmFn);
 
-struct ArmSpecs(Vec<IndexBitPair>, ArmFn);
-
-impl ArmSpecs {
+impl<'a> ArmSpecs<'a> {
     fn try_match_discriminant(&self, disc: u32) -> Option<ArmFn> {
         if specs_matches(&self.0, disc) {
-            Some(self.1)
+            Some(self.2)
         } else {
             None
         }
     }
 }
 
+struct ArmLookupTable {
+    disc2idx: Vec<u8>,
+    idx2fn: Vec<ArmFn>,
+}
+
+
 impl ArmLookupTable {
-    fn compute() -> ArmLookupTable {
+    pub fn compute() -> ArmLookupTable {
         let arm_specs_table = ARM_PATTERN_TABLE.iter()
-            .map(|&(fmt, _, arm_fn)| process_arm_format(fmt, arm_fn))
+            .map(|&(fmt, syntax, arm_fn)| ArmSpecs(process_arm_format(fmt), syntax, arm_fn) )
             .collect::<Vec<ArmSpecs>>();
 
         let mut arm_fns = Vec::<ArmFn>::new();
         let disc2idx = (0..=0xFFF).map(|disc| {
-            let specs_matches = arm_specs_table.iter()
+            let matched_fns = arm_specs_table.iter()
                 .filter_map(|s| s.try_match_discriminant(disc))
                 .collect::<Vec<ArmFn>>();
-            // TODO
-            // let specs: ArmFn = match specs_matches.len() {
-            //     0 => Ok(undefined),
-            //     1 => Ok(specs_matches[0]),
-            //     _ => Err(err(format!("More than 1 matching specs for discriminant {:03X}", disc))),
-            // }?;
-        });
-        // TODO
-        ArmLookupTable{ disc2idx: vec![0u8], idx2fn: vec![data_processing]}
+            let n_matches = matched_fns.len();
+            let matched_fn: ArmFn = match n_matches {
+                0 => Ok(undefined as ArmFn),
+                1 => Ok(matched_fns[0]),
+                _ => Err(err(format!("{} matching specs for discriminant {:03X}", n_matches, disc))),
+            }?;
+            Ok(arm_fns.iter()
+               .position(|&f| f as usize == matched_fn as usize) // compare function pointers
+               .unwrap_or_else(|| {
+                   arm_fns.push(matched_fn);
+                   arm_fns.len() - 1
+               }) as u8)
+        }).collect::<DisResult<Vec<u8>>>().unwrap();
+
+        ArmLookupTable{disc2idx: disc2idx, idx2fn: arm_fns}
     }
 }
 
-fn process_arm_format(fmt: &str, arm_fn: ArmFn) -> ArmSpecs {
-    ArmSpecs(process_bit_format(fmt, |i| (4 <= i && i < 8) || (20 <= i && i < 28)), arm_fn)
+fn process_arm_format(fmt: &str) -> Vec<IndexBitPair> {
+    process_bit_format(fmt, |i| (4 <= i && i < 8) || (20 <= i && i < 28))
 }
 
 pub static ARM_PATTERN_TABLE: &[(&str, &str, ArmFn)] = &[
@@ -337,18 +344,18 @@ pub static ARM_PATTERN_TABLE: &[(&str, &str, ArmFn)] = &[
     ("000 0111 S nnnn dddd iiii 0ii1 iiii", "RSC<S> %Rn, %Rd, <op2>", data_processing),
     ("000 0111 S nnnn dddd iiii iii0 iiii", "RSC<S> %Rn, %Rd, <op2>", data_processing),
     ("001 0111 S nnnn dddd iiii iiii iiii", "RSC<S> %Rn, %Rd, <op2>", data_processing),
-    ("000 1000 S nnnn dddd iiii 0ii1 iiii", "TST %Rn, %Rd, <op2>", data_processing),
-    ("000 1000 S nnnn dddd iiii iii0 iiii", "TST %Rn, %Rd, <op2>", data_processing),
-    ("001 1000 S nnnn dddd iiii iiii iiii", "TST %Rn, %Rd, <op2>", data_processing),
-    ("000 1001 S nnnn dddd iiii 0ii1 iiii", "TEQ %Rn, %Rd, <op2>", data_processing),
-    ("000 1001 S nnnn dddd iiii iii0 iiii", "TEQ %Rn, %Rd, <op2>", data_processing),
-    ("001 1001 S nnnn dddd iiii iiii iiii", "TEQ %Rn, %Rd, <op2>", data_processing),
-    ("000 1010 S nnnn dddd iiii 0ii1 iiii", "CMP %Rn, %Rd, <op2>", data_processing),
-    ("000 1010 S nnnn dddd iiii iii0 iiii", "CMP %Rn, %Rd, <op2>", data_processing),
-    ("001 1010 S nnnn dddd iiii iiii iiii", "CMP %Rn, %Rd, <op2>", data_processing),
-    ("000 1011 S nnnn dddd iiii 0ii1 iiii", "CMN %Rn, %Rd, <op2>", data_processing),
-    ("000 1011 S nnnn dddd iiii iii0 iiii", "CMN %Rn, %Rd, <op2>", data_processing),
-    ("001 1011 S nnnn dddd iiii iiii iiii", "CMN %Rn, %Rd, <op2>", data_processing),
+    ("000 1000 1 nnnn dddd iiii 0ii1 iiii", "TST %Rn, %Rd, <op2>", data_processing),
+    ("000 1000 1 nnnn dddd iiii iii0 iiii", "TST %Rn, %Rd, <op2>", data_processing),
+    ("001 1000 1 nnnn dddd iiii iiii iiii", "TST %Rn, %Rd, <op2>", data_processing),
+    ("000 1001 1 nnnn dddd iiii 0ii1 iiii", "TEQ %Rn, %Rd, <op2>", data_processing),
+    ("000 1001 1 nnnn dddd iiii iii0 iiii", "TEQ %Rn, %Rd, <op2>", data_processing),
+    ("001 1001 1 nnnn dddd iiii iiii iiii", "TEQ %Rn, %Rd, <op2>", data_processing),
+    ("000 1010 1 nnnn dddd iiii 0ii1 iiii", "CMP %Rn, %Rd, <op2>", data_processing),
+    ("000 1010 1 nnnn dddd iiii iii0 iiii", "CMP %Rn, %Rd, <op2>", data_processing),
+    ("001 1010 1 nnnn dddd iiii iiii iiii", "CMP %Rn, %Rd, <op2>", data_processing),
+    ("000 1011 1 nnnn dddd iiii 0ii1 iiii", "CMN %Rn, %Rd, <op2>", data_processing),
+    ("000 1011 1 nnnn dddd iiii iii0 iiii", "CMN %Rn, %Rd, <op2>", data_processing),
+    ("001 1011 1 nnnn dddd iiii iiii iiii", "CMN %Rn, %Rd, <op2>", data_processing),
     ("000 1100 S nnnn dddd iiii 0ii1 iiii", "ORR<S> %Rn, %Rd, <op2>", data_processing),
     ("000 1100 S nnnn dddd iiii iii0 iiii", "ORR<S> %Rn, %Rd, <op2>", data_processing),
     ("001 1100 S nnnn dddd iiii iiii iiii", "ORR<S> %Rn, %Rd, <op2>", data_processing),
@@ -390,14 +397,14 @@ pub static ARM_PATTERN_TABLE: &[(&str, &str, ArmFn)] = &[
     ("010 P U1W1 nnnn dddd oooo oooo oooo", "LDRB %Rd, [%Rn, #offset[i]]", single_data_transfer),
     ("011 P U1W1 nnnn dddd oooo oooo oooo", "LDRB %Rd, [%Rn, <op2_reg>]", single_data_transfer),
 
-    ("010 P U0W0 nnnn dddd oooo oooo oooo", "LDR %Rd, [%Rn, #offset[i]]", single_data_transfer),
-    ("011 P U0W0 nnnn dddd oooo oooo oooo", "LDR %Rd, [%Rn, <op2_reg>]", single_data_transfer),
-    ("010 P U1W0 nnnn dddd oooo oooo oooo", "LDRB %Rd, [%Rn, #offset[i]]", single_data_transfer),
-    ("011 P U1W0 nnnn dddd oooo oooo oooo", "LDRB %Rd, [%Rn, <op2_reg>]", single_data_transfer),
+    ("010 P U0W0 nnnn dddd oooo oooo oooo", "STR %Rd, [%Rn, #offset[i]]", single_data_transfer),
+    ("011 P U0W0 nnnn dddd oooo oooo oooo", "STR %Rd, [%Rn, <op2_reg>]", single_data_transfer),
+    ("010 P U1W0 nnnn dddd oooo oooo oooo", "STRB %Rd, [%Rn, #offset[i]]", single_data_transfer),
+    ("011 P U1W0 nnnn dddd oooo oooo oooo", "STRB %Rd, [%Rn, <op2_reg>]", single_data_transfer),
 
     // Shouldn't occur
-    ("011 x xxxx xxxx xxxx xxxx xxx1 xxxx", "Undefined", |_: &mut ArmCore, _: ArmIns| {}),
-    //    P USWL
+    // ("011 x xxxx xxxx xxxx xxxx xxx1 xxxx", "Undefined", |_: &mut ArmCore, _: ArmIns| {}),
+    
     ("100 0 1SW1 nnnn rrrr rrrr rrrr rrrr", "LDMIA<S> %Rn<wb>, { %+Rr }", block_data_transfer),
     ("100 1 1SW1 nnnn rrrr rrrr rrrr rrrr", "LDMIB<S> %Rn<wb>, { %+Rr }", block_data_transfer),
     ("100 0 0SW1 nnnn rrrr rrrr rrrr rrrr", "LDMDA<S> %Rn<wb>, { %+Rr }", block_data_transfer),
@@ -418,3 +425,13 @@ pub static ARM_PATTERN_TABLE: &[(&str, &str, ArmFn)] = &[
 
     ("1111 iiii iiii iiii iiii iiii iiii", "SW #[i]", software_interrupt),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test() {
+        let lut = ArmLookupTable::compute();
+        assert!(true);
+    }
+}

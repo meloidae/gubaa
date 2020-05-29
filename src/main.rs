@@ -4,6 +4,7 @@ extern crate num_traits;
 
 mod arm;
 use crate::arm::StatusRegister;
+use crate::arm::ArmCore;
 
 struct Foo<'a> {
     x: &'a i32,
@@ -31,11 +32,6 @@ struct Point3d {
 
 
 fn main() {
-    // let mut point = Point3d { x: 0, y: 0, z:2 };
-    // point = Point3d { y: 1, .. point };
-    // println!("The point is at ({}, {}, {})", point.x, point.y, point.z);
-    // let (.., z) = point_coord(&point);
-    // println!("The point's z is {}", z);
     let x: usize = 15;
     let y: u32 = 15;
     println!("{}", x == (y as usize));
