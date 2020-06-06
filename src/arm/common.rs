@@ -222,7 +222,7 @@ pub(super) fn process_bit_format(fmt: &str, accept_index: fn(usize) -> bool) -> 
         .rev()
         .enumerate()
         .filter(|&(i, _)| accept_index(i))
-        .map(|(i, c)| spec_char_to_bit(c))
+        .map(|(_, c)| spec_char_to_bit(c))
         .enumerate()
         .filter(|&(_, b)| match b { Bit::Any => false, _ => true })
         .collect::<Vec<IndexBitPair>>()

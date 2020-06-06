@@ -223,7 +223,29 @@ fn multiply_long(arm: &mut ArmCore, ins: ArmIns) {
 }
 
 fn single_data_swap(arm: &mut ArmCore, ins: ArmIns) {
+    let byte = ins.flag(8);
 }
+
+fn single_data_swap_word(arm: &mut ArmCore, ins: ArmIns) {
+    let rn_idx = ins.reg(16);
+    let rd_idx = ins.reg(12);
+    let rm_idx = ins.reg(0);
+
+    assert!(rn_idx != REG_PC);
+    assert!(rd_idx != REG_PC);
+    assert!(rm_idx != REG_PC);
+}
+
+fn single_data_swap_byte(arm: &mut ArmCore, ins: ArmIns) {
+    let rn_idx = ins.reg(16);
+    let rd_idx = ins.reg(12);
+    let rm_idx = ins.reg(0);
+
+    assert!(rn_idx != REG_PC);
+    assert!(rd_idx != REG_PC);
+    assert!(rm_idx != REG_PC);
+}
+
 
 // TODO
 fn branch_and_exchange(arm: &mut ArmCore, ins: ArmIns) {

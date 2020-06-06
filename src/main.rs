@@ -2,6 +2,10 @@
 extern crate enum_primitive_derive;
 extern crate num_traits;
 
+
+#[macro_use]
+mod memory;
+mod cpu;
 mod arm;
 use crate::arm::StatusRegister;
 use crate::arm::ArmCore;
