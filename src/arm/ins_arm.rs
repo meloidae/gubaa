@@ -32,7 +32,7 @@ impl ArmIns {
     }
 
     pub fn discriminant(&self) -> u32 {
-        self.slice(4, 8) | self.slice(20, 28) << 4
+        self.slice(4, 8) | self.slice(16, 17) << 4 | self.slice(20, 28) << 5
     }
 }
 
@@ -136,6 +136,9 @@ fn data_processing(arm: &mut ArmCore, ins: ArmIns) {
         _ => arm.set_reg(rd_idx, result),
     };
 
+}
+
+fn psr_transfer(arm: &mut ArmCore, ins: ArmIns) {
 }
 
 fn multiply(arm: &mut ArmCore, ins: ArmIns) {
@@ -314,7 +317,7 @@ impl ArmLookupTable {
             .collect::<Vec<ArmSpecs>>();
 
         let mut arm_fns = Vec::<ArmFn>::new();
-        let disc2idx = (0..=0xFFF).map(|disc| {
+        let disc2idx = (0..=0xFFF * 2).map(|disc| {
             let matched_fns = arm_specs_table.iter()
                 .filter_map(|s| s.try_match_discriminant(disc))
                 .collect::<Vec<ArmFn>>();
@@ -337,11 +340,11 @@ impl ArmLookupTable {
 }
 
 fn process_arm_format(fmt: &str) -> Vec<IndexBitPair> {
-    process_bit_format(fmt, |i| (4 <= i && i < 8) || (20 <= i && i < 28))
+    process_bit_format(fmt, |i| (4 <= i && i < 8) || i == 16 || (20 <= i && i < 28))
 }
 
 pub static ARM_PATTERN_TABLE: &[(&str, &str, ArmFn)] = &[
-
+    // data processing
     ("000 0000 S nnnn dddd iiii 0ii1 iiii", "AND<S> %Rn, %Rd, <op2>", data_processing),
     ("000 0000 S nnnn dddd iiii iii0 iiii", "AND<S> %Rn, %Rd, <op2>", data_processing),
     ("001 0000 S nnnn dddd iiii iiii iiii", "AND<S> %Rn, %Rd, <op2>", data_processing),
@@ -390,6 +393,13 @@ pub static ARM_PATTERN_TABLE: &[(&str, &str, ArmFn)] = &[
     ("000 1111 S nnnn dddd iiii 0ii1 iiii", "MVN<S> %Rn, %Rd, <op2>", data_processing),
     ("000 1111 S nnnn dddd iiii iii0 iiii", "MVN<S> %Rn, %Rd, <op2>", data_processing),
     ("001 1111 S nnnn dddd iiii iiii iiii", "MVN<S> %Rn, %Rd, <op2>", data_processing),
+
+
+    // psr transfer
+    ("0001 0 s 00 1111 dddd 0000 0000 0000", "MRS %Rd, <psr>", psr_transfer),
+    ("0001 0 d 10 1001 1111 0000 0000 mmmm", "MSR <psr>, %Rm", psr_transfer),
+    ("0001 0 d 10 1000 1111 0000 0000 mmmm", "MSR <psr>, <rot_imm>", psr_transfer),
+    ("0011 0 d 10 1000 1111 rrrr iiii iiii", "MSR <psr>, <rot_imm>", psr_transfer),
 
     ("0000 000S dddd nnnn ssss 1001 mmmm", "MUL<S> %Rd, %Rm, %Rs", multiply),
     ("0000 001S dddd nnnn ssss 1001 mmmm", "MLA<S> %Rd, %Rm, %Rs, %Rn", multiply),
