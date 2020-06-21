@@ -1,4 +1,4 @@
-use super::{Condition, ArmCore, REG_PC};
+use super::{Condition, ArmCore, REG_PC, StatusRegister};
 
 use crate::arm::common::{lsl_carry, lsl_no_carry, lsr_carry, lsr_no_carry, asr_carry, asr_no_carry,
     ror_carry, ror_no_carry, and, eor, add, adc, sub, sbc, orr, mov, bic, mvn, set_nz, set_nz_long,
@@ -32,7 +32,8 @@ impl ArmIns {
     }
 
     pub fn discriminant(&self) -> u32 {
-        self.slice(4, 8) | self.slice(16, 17) << 4 | self.slice(20, 28) << 5
+        // self.slice(4, 8) | self.slice(16, 17) << 4 | self.slice(20, 28) << 5
+        self.slice(4, 8) | self.slice(20, 28) << 4
     }
 }
 
@@ -79,6 +80,11 @@ fn get_shifted_register(arm: &mut ArmCore, ins: ArmIns, set_carry: bool) -> u32 
     }
 }
 
+
+fn undefined(arm: &mut ArmCore, _: ArmIns) {
+}
+
+
 fn data_processing(arm: &mut ArmCore, ins: ArmIns) {
     const AND: u32 = 0b0000;
     const EOR: u32 = 0b0001;
@@ -111,7 +117,7 @@ fn data_processing(arm: &mut ArmCore, ins: ArmIns) {
     };
 
     if rd_idx == REG_PC && set_flags {
-
+        // TODO
     }
 
     // Calculate result of operation
@@ -138,7 +144,105 @@ fn data_processing(arm: &mut ArmCore, ins: ArmIns) {
 
 }
 
-fn psr_transfer(arm: &mut ArmCore, ins: ArmIns) {
+
+// psr transfer
+
+fn mrs(arm: &mut ArmCore, ins: ArmIns) {
+    if ins.slice(0, 12) != 0 || ins.slice(16, 20) != 0xF {
+        undefined(arm, ins);
+    }
+
+    let spsr_flag = ins.flag(22);
+    let rd_idx = ins.reg(12);
+
+    assert!(rd_idx != REG_PC);
+
+    let value: u32 = if spsr_flag {
+        if let Some(spsr) = arm.get_spsr() {
+            spsr.into()
+        } else {
+            // TODO: proper error logging
+            print!("Tried to get SPSR in mode {:?} that has no SPSR", arm.cpsr.mode);
+            0
+        }
+    } else {
+        arm.cpsr.into()
+    };
+
+    arm.regs[rd_idx] = value;
+}
+
+fn msr_reg(arm: &mut ArmCore, ins: ArmIns) {
+    if ins.slice(8, 20) & !0x100 != 0b1000_1111_0000 {
+        undefined(arm, ins);
+    }
+    let flags_only = !ins.flag(16);
+    if flags_only {
+        msr_reg_flag(arm, ins);
+    } else {
+        msr_reg_all(arm, ins);
+    }
+}
+
+fn msr_reg_all(arm: &mut ArmCore, ins: ArmIns) {
+    let spsr_flag = ins.flag(22);
+    let rm_idx = ins.reg(0);
+
+    assert!(rm_idx != REG_PC);
+
+    let rm_value = arm.regs[rm_idx];
+
+    if spsr_flag {
+        if let Some(spsr) = arm.get_spsr_mut() {
+            *spsr = rm_value.into();
+        } else {
+            // TODO: proper error logging
+            print!("Tried to set SPSR in mode {:?} that has no SPSR", arm.cpsr.mode);
+        }
+    } else {
+        arm.set_cpsr(rm_value);
+    }
+}
+
+fn msr_reg_flag(arm: &mut ArmCore, ins: ArmIns) {
+    let spsr_flag = ins.flag(22);
+    let rm_idx = ins.reg(0);
+
+    assert!(rm_idx != REG_PC);
+
+    let rm_value = arm.regs[rm_idx];
+
+    if spsr_flag {
+        if let Some(spsr) = arm.get_spsr_mut() {
+            spsr.set_flags(rm_value);
+        } else  {
+            // TODO: proper error logging
+            print!("Tried to set SPSR in mode {:?} that has no SPSR", arm.cpsr.mode);
+        }
+    } else {
+        arm.cpsr.set_flags(rm_value);
+    }
+}
+
+fn msr_imm_flag(arm: &mut ArmCore, ins: ArmIns) {
+    if ins.slice(12, 20) != 0b1000_1111 {
+        undefined(arm, ins)
+    }
+
+    let spsr_flag = ins.flag(22);
+    // TODO: should carry be set?
+    let value = get_rotated_immediate(arm, ins, false);
+
+    if spsr_flag {
+        if let Some(spsr) = arm.get_spsr_mut() {
+            spsr.set_flags(value);
+        } else {
+            // TODO: proper error logging
+            print!("Tried to set SPSR in mode {:?} that has no SPSR", arm.cpsr.mode);
+        }
+    } else {
+        arm.cpsr.set_flags(value);
+    }
 }
 
 fn multiply(arm: &mut ArmCore, ins: ArmIns) {
@@ -289,9 +393,6 @@ fn branch(arm: &mut ArmCore, ins: ArmIns) {
 fn software_interrupt(arm: &mut ArmCore, ins: ArmIns) {
 }
 
-fn undefined(arm: &mut ArmCore, ins: ArmIns) {
-}
-
 struct ArmSpecs<'a>(Vec<IndexBitPair>, &'a str, ArmFn);
 
 impl<'a> ArmSpecs<'a> {
@@ -340,7 +441,7 @@ impl ArmLookupTable {
 }
 
 fn process_arm_format(fmt: &str) -> Vec<IndexBitPair> {
-    process_bit_format(fmt, |i| (4 <= i && i < 8) || i == 16 || (20 <= i && i < 28))
+    process_bit_format(fmt, |i| (4 <= i && i < 8) || (20 <= i && i < 28))
 }
 
 pub static ARM_PATTERN_TABLE: &[(&str, &str, ArmFn)] = &[
@@ -396,10 +497,9 @@ pub static ARM_PATTERN_TABLE: &[(&str, &str, ArmFn)] = &[
 
 
     // psr transfer
-    ("0001 0 s 00 1111 dddd 0000 0000 0000", "MRS %Rd, <psr>", psr_transfer),
-    ("0001 0 d 10 1001 1111 0000 0000 mmmm", "MSR <psr>, %Rm", psr_transfer),
-    ("0001 0 d 10 1000 1111 0000 0000 mmmm", "MSR <psr>, <rot_imm>", psr_transfer),
-    ("0011 0 d 10 1000 1111 rrrr iiii iiii", "MSR <psr>, <rot_imm>", psr_transfer),
+    ("0001 0 s 00 1111 dddd 0000 0000 0000", "MRS %Rd, <psr>", mrs),
+    ("0001 0 d 10 100f 1111 0000 0000 mmmm", "MSR <psr>, %Rm", msr_reg),
+    ("0011 0 d 10 1000 1111 rrrr iiii iiii", "MSR <psr>, <rot_imm>", msr_imm_flag),
 
     ("0000 000S dddd nnnn ssss 1001 mmmm", "MUL<S> %Rd, %Rm, %Rs", multiply),
     ("0000 001S dddd nnnn ssss 1001 mmmm", "MLA<S> %Rd, %Rm, %Rs, %Rn", multiply),

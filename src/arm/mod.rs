@@ -3,8 +3,10 @@ mod common;
 mod ins_arm;
 
 use num_traits::FromPrimitive;
+use std::mem;
 
 use crate::arm::ins_arm::{ArmIns};
+
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Primitive)]
 pub enum Condition {
@@ -38,13 +40,14 @@ pub enum OperatingMode {
     System = 0x1f,
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Primitive)]
 enum Bank {
-    None = 0,
-    Fiq = 1,
-    Supervisor = 2,
-    Abort = 3,
-    Irq = 4,
-    Undefined = 5,
+    Fiq = 0,
+    Supervisor = 1,
+    Abort = 2,
+    Irq = 3,
+    Undefined = 4,
+    None = 5,
 }
 
 enum Access {
@@ -104,15 +107,25 @@ impl From<StatusRegister> for u32 {
     }
 }
 
+impl StatusRegister {
+    fn set_flags(&mut self, bits: u32) {
+        let sr = StatusRegister::from(bits);
+        self.n = sr.n;
+        self.z = sr.z;
+        self.c = sr.c;
+        self.v = sr.v;
+    }
+}
+
 pub const REG_SP: usize = 13;
 pub const REG_LR: usize = 14;
 pub const REG_PC: usize = 15;
 
 pub struct ArmCore {
     regs: [u32; 16],
-    banks: [[u32; BANK_COUNT]; 7],
+    banks: [[u32; BANK_COUNT - 1]; 7],
     cpsr: StatusRegister,
-    spsrs: [StatusRegister; BANK_COUNT],
+    spsr: [StatusRegister; BANK_COUNT - 1],
     pipe: Pipeline,
 }
 
@@ -162,10 +175,64 @@ impl ArmCore {
     fn get_function_from_instruction(&self, instruction: u32) {}
 
     fn switch_mode(&mut self, mode: OperatingMode) {
+        let from_mode = self.cpsr.mode;
+        self.swap_bank(from_mode);
+        self.swap_bank(mode);
+        self.cpsr.mode = mode;
     }
 
     fn set_reg(&mut self, index: usize, value: u32) {
         self.regs[index] = value;
+    }
+
+    fn set_cpsr(&mut self, bits: u32) {
+        let new_cpsr = StatusRegister::from(bits);
+        // thumb state of cpsr should not be changed
+        assert!(new_cpsr.thumb_state == self.cpsr.thumb_state);
+        if new_cpsr.mode != self.cpsr.mode {
+            let from_mode = self.cpsr.mode;
+            self.swap_bank(from_mode);
+            self.swap_bank(new_cpsr.mode);
+        }
+        self.cpsr = new_cpsr;
+    }
+
+    fn swap_bank(&mut self, mode: OperatingMode) {
+        const BANK_OFFSET: usize = 8;
+        let bank_mode = self.get_register_bank_mode(mode);
+        let bank_idxs: &[usize] = match bank_mode {
+            Bank::None => &[],
+            Bank::Fiq => {
+                if self.cpsr.thumb_state {
+                    &[5, 6]
+                } else { // arm state for FIQ has 7 banked registers
+                    &[0, 1, 2, 3, 4, 5, 6]
+                }
+            },
+            Bank::Irq | Bank::Supervisor | Bank::Abort | Bank::Undefined => &[5, 6]
+        };
+
+        for &idx in bank_idxs {
+            mem::swap(&mut self.regs[idx + BANK_OFFSET], &mut self.banks[bank_mode as usize][idx]);
+        }
+    }
+
+    fn get_spsr(&self) -> Option<StatusRegister> {
+        let bank_mode = self.get_register_bank_mode(self.cpsr.mode);
+        if bank_mode == Bank::None {
+            None
+        } else {
+            Some(self.spsr[bank_mode as usize])
+        }
+    }
+
+    fn get_spsr_mut(&mut self) -> Option<&mut StatusRegister> {
+        let bank_mode = self.get_register_bank_mode(self.cpsr.mode);
+        if bank_mode == Bank::None {
+            None
+        } else {
+            Some(&mut self.spsr[bank_mode as usize])
+        }
     }
 
     // // for testing purpose
