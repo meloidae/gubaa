@@ -5,7 +5,8 @@ mod ins_arm;
 use num_traits::FromPrimitive;
 use std::mem;
 
-use crate::arm::ins_arm::{ArmIns};
+use crate::arm::ins_arm::{ArmIns, ArmLookupTable};
+use crate::memory::{Memory};
 
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Primitive)]
@@ -60,6 +61,15 @@ const BANK_COUNT: usize = 6;
 struct Pipeline {
     fetch_type: Access,
     ins: [u32; 2],
+}
+
+impl Default for Pipeline {
+    fn default() -> Pipeline {
+        Pipeline {
+            fetch_type: Access::Nonsequential,
+            ins: Default::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -117,19 +127,49 @@ impl StatusRegister {
     }
 }
 
+impl Default for StatusRegister {
+    fn default() -> StatusRegister {
+        StatusRegister {
+            n: false,
+            z: false,
+            c: false,
+            v: false,
+
+            irq_disable: false,
+            fiq_disable: false,
+            thumb_state: false,
+            mode: OperatingMode::None,
+        }
+    }
+}
+
 pub const REG_SP: usize = 13;
 pub const REG_LR: usize = 14;
 pub const REG_PC: usize = 15;
 
-pub struct ArmCore {
+pub struct ArmCore<'a> {
     regs: [u32; 16],
     banks: [[u32; BANK_COUNT - 1]; 7],
     cpsr: StatusRegister,
     spsr: [StatusRegister; BANK_COUNT - 1],
     pipe: Pipeline,
+    memory: &'a mut dyn Memory,
+    arm_lut: ArmLookupTable,
 }
 
-impl ArmCore {
+impl ArmCore<'_> {
+    pub fn new(memref: &mut dyn Memory) -> ArmCore {
+        ArmCore {
+            regs: Default::default(),
+            banks: Default::default(),
+            cpsr: Default::default(),
+            spsr: Default::default(),
+            pipe: Default::default(),
+            memory: memref,
+            arm_lut: ArmLookupTable::compute(),
+        }
+    }
+
     fn run(&mut self) {
         let ins = self.pipe.ins[0];
         if self.cpsr.thumb_state {
@@ -172,8 +212,6 @@ impl ArmCore {
         }
     }
 
-    fn get_function_from_instruction(&self, instruction: u32) {}
-
     fn switch_mode(&mut self, mode: OperatingMode) {
         let from_mode = self.cpsr.mode;
         self.swap_bank(from_mode);
@@ -187,7 +225,7 @@ impl ArmCore {
 
     fn set_cpsr(&mut self, bits: u32) {
         let new_cpsr = StatusRegister::from(bits);
-        // thumb state of cpsr should not be changed
+        // thumb state bit of cpsr should not be changed
         assert!(new_cpsr.thumb_state == self.cpsr.thumb_state);
         if new_cpsr.mode != self.cpsr.mode {
             let from_mode = self.cpsr.mode;

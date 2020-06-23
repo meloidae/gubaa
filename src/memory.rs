@@ -1,4 +1,8 @@
+use std::ops::{Deref, DerefMut};
 use std::convert::TryInto;
+use std::ptr;
+
+use crate::cpu::Cpu;
 
 pub trait Memory {
     fn read_byte(&self, addr: u32) -> u8;
@@ -9,6 +13,34 @@ pub trait Memory {
     fn write_half(&mut self, addr: u32, value: u16);
     fn write_word(&mut self, addr: u32, value: u32);
 }
+
+// #[derive(Clone)]
+// pub struct MemoryPtr(*mut dyn Memory);
+// 
+// impl MemoryPtr {
+//     pub fn null() -> MemoryPtr {
+//         MemoryPtr(ptr::null_mut::<Cpu>() as *mut dyn Memory)
+//     }
+// 
+//     pub fn new(memory: *mut dyn Memory) -> Self {
+//         Self(memory)
+//     }
+// }
+// 
+// impl Default for MemoryPtr {
+//     fn default() -> Self {
+//         Self::null()
+//     }
+// }
+// 
+// impl Deref for MemoryPtr {
+//     type Target = dyn Memory;
+// 
+//     fn deref(&self) -> &Self::Target {
+//         &self.0
+//     }
+// }
+
 
 
 #[derive(Clone)]

@@ -1,10 +1,14 @@
-use super::{Condition, ArmCore, REG_PC, StatusRegister};
+use super::{Condition, ArmCore, REG_PC, StatusRegister, OperatingMode};
 
 use crate::arm::common::{lsl_carry, lsl_no_carry, lsr_carry, lsr_no_carry, asr_carry, asr_no_carry,
     ror_carry, ror_no_carry, and, eor, add, adc, sub, sbc, orr, mov, bic, mvn, set_nz, set_nz_long,
     process_bit_format, specs_matches, err, DisResult, IndexBitPair};
 
+use crate::memory::{Memory};
+
 use num_traits::FromPrimitive;
+
+use log::{error, warn, info, debug};
 
 #[derive(Clone, Copy)]
 pub struct ArmIns(u32);
@@ -32,7 +36,6 @@ impl ArmIns {
     }
 
     pub fn discriminant(&self) -> u32 {
-        // self.slice(4, 8) | self.slice(16, 17) << 4 | self.slice(20, 28) << 5
         self.slice(4, 8) | self.slice(20, 28) << 4
     }
 }
@@ -81,7 +84,8 @@ fn get_shifted_register(arm: &mut ArmCore, ins: ArmIns, set_carry: bool) -> u32 
 }
 
 
-fn undefined(arm: &mut ArmCore, _: ArmIns) {
+fn undefined(_arm: &mut ArmCore, ins: ArmIns) {
+    warn!("Instruction Code {:08X} is undefined", ins.0);
 }
 
 
@@ -149,7 +153,7 @@ fn data_processing(arm: &mut ArmCore, ins: ArmIns) {
 
 fn mrs(arm: &mut ArmCore, ins: ArmIns) {
     if ins.slice(0, 12) != 0 || ins.slice(16, 20) != 0xF {
-        undefined(arm, ins);
+        return undefined(arm, ins);
     }
 
     let spsr_flag = ins.flag(22);
@@ -162,7 +166,7 @@ fn mrs(arm: &mut ArmCore, ins: ArmIns) {
             spsr.into()
         } else {
             // TODO: proper error logging
-            print!("Tried to get SPSR in mode {:?} that has no SPSR", arm.cpsr.mode);
+            warn!("Tried to get SPSR in mode {:?} that has no SPSR", arm.cpsr.mode);
             0
         }
     } else {
@@ -174,7 +178,7 @@ fn mrs(arm: &mut ArmCore, ins: ArmIns) {
 
 fn msr_reg(arm: &mut ArmCore, ins: ArmIns) {
     if ins.slice(8, 20) & !0x100 != 0b1000_1111_0000 {
-        undefined(arm, ins);
+        return undefined(arm, ins);
     }
     let flags_only = !ins.flag(16);
     if flags_only {
@@ -197,7 +201,7 @@ fn msr_reg_all(arm: &mut ArmCore, ins: ArmIns) {
             *spsr = rm_value.into();
         } else {
             // TODO: proper error logging
-            print!("Tried to set SPSR in mode {:?} that has no SPSR", arm.cpsr.mode);
+            warn!("Tried to set SPSR in mode {:?} that has no SPSR", arm.cpsr.mode);
         }
     } else {
         arm.set_cpsr(rm_value);
@@ -217,7 +221,7 @@ fn msr_reg_flag(arm: &mut ArmCore, ins: ArmIns) {
             spsr.set_flags(rm_value);
         } else  {
             // TODO: proper error logging
-            print!("Tried to set SPSR in mode {:?} that has no SPSR", arm.cpsr.mode);
+            warn!("Tried to set SPSR in mode {:?} that has no SPSR", arm.cpsr.mode);
         }
     } else {
         arm.cpsr.set_flags(rm_value);
@@ -226,7 +230,7 @@ fn msr_reg_flag(arm: &mut ArmCore, ins: ArmIns) {
 
 fn msr_imm_flag(arm: &mut ArmCore, ins: ArmIns) {
     if ins.slice(12, 20) != 0b1000_1111 {
-        undefined(arm, ins)
+        return undefined(arm, ins)
     }
 
     let spsr_flag = ins.flag(22);
@@ -238,7 +242,7 @@ fn msr_imm_flag(arm: &mut ArmCore, ins: ArmIns) {
             spsr.set_flags(value);
         } else {
             // TODO: proper error logging
-            print!("Tried to set SPSR in mode {:?} that has no SPSR", arm.cpsr.mode);
+            warn!("Tried to set SPSR in mode {:?} that has no SPSR", arm.cpsr.mode);
         }
     } else {
         arm.cpsr.set_flags(value);
@@ -329,11 +333,11 @@ fn multiply_long(arm: &mut ArmCore, ins: ArmIns) {
     arm.regs[rdlo_idx] = result as u32;
 }
 
-fn single_data_swap(arm: &mut ArmCore, ins: ArmIns) {
-    let byte = ins.flag(8);
-}
-
-fn single_data_swap_word(arm: &mut ArmCore, ins: ArmIns) {
+// single data swap
+fn swp(arm: &mut ArmCore, ins: ArmIns) {
+    if ins.slice(8, 12) != 0b0000 {
+        return undefined(arm, ins);
+    }
     let rn_idx = ins.reg(16);
     let rd_idx = ins.reg(12);
     let rm_idx = ins.reg(0);
@@ -341,9 +345,19 @@ fn single_data_swap_word(arm: &mut ArmCore, ins: ArmIns) {
     assert!(rn_idx != REG_PC);
     assert!(rd_idx != REG_PC);
     assert!(rm_idx != REG_PC);
+
+    let addr = arm.regs[rn_idx];
+    let rm_value = arm.regs[rm_idx];
+
+    let mem_value = arm.memory.read_word(addr);
+    arm.regs[rm_idx] = mem_value;
+    arm.memory.write_word(addr, rm_value);
 }
 
-fn single_data_swap_byte(arm: &mut ArmCore, ins: ArmIns) {
+fn swpb(arm: &mut ArmCore, ins: ArmIns) {
+    if ins.slice(8, 12) != 0b0000 {
+        return undefined(arm, ins);
+    }
     let rn_idx = ins.reg(16);
     let rd_idx = ins.reg(12);
     let rm_idx = ins.reg(0);
@@ -351,8 +365,14 @@ fn single_data_swap_byte(arm: &mut ArmCore, ins: ArmIns) {
     assert!(rn_idx != REG_PC);
     assert!(rd_idx != REG_PC);
     assert!(rm_idx != REG_PC);
-}
 
+    let addr = arm.regs[rn_idx];
+    let rm_value = arm.regs[rm_idx];
+
+    let mem_value = arm.memory.read_byte(addr) as u32;
+    arm.regs[rm_idx] = mem_value;
+    arm.memory.write_byte(addr, rm_value as u8);
+}
 
 // TODO
 fn branch_and_exchange(arm: &mut ArmCore, ins: ArmIns) {
@@ -365,23 +385,137 @@ fn branch_and_exchange(arm: &mut ArmCore, ins: ArmIns) {
 fn halfword_data_transfer(arm: &mut ArmCore, ins: ArmIns) {
 }
 
-
-fn single_data_transfer(arm: &mut ArmCore, ins: ArmIns) {
+// single data transfer
+fn single_data_load(arm: &mut ArmCore, ins: ArmIns, load_fn: impl Fn(&mut dyn Memory, u32) -> u32, offset_fn: impl Fn(&mut ArmCore, ArmIns) -> u32) {
     let rd_idx = ins.reg(12);
     let rn_idx = ins.reg(16);
 
-    let imm = !ins.flag(25);
     let preindex = ins.flag(24);
     let up = ins.flag(23);
-    let byte = ins.flag(22);
     let writeback = ins.flag(21);
-    let load = ins.flag(20);
 
-    let offset = if imm {
-        ins.slice(0, 12)
+    assert!(!(rn_idx == REG_PC && writeback));
+
+    // post-index + writeback =  generate user address for privilege mode
+    let mode = arm.cpsr.mode;
+    if !preindex && writeback {
+        arm.switch_mode(OperatingMode::User);
+    }
+
+    let rn_value = arm.regs[rn_idx];
+    let mut offset = offset_fn(arm, ins);
+
+    if !up {
+        offset = (offset as i32).wrapping_neg() as u32;
+    }
+
+    let addr = if preindex {
+        rn_value.wrapping_add(offset)
     } else {
-        get_shifted_register(arm, ins, false)
+        rn_value
     };
+
+    let value = load_fn(arm.memory, addr);
+    arm.set_reg(rd_idx, value);
+
+    if !preindex && writeback {
+        arm.switch_mode(mode);
+    }
+
+    // TODO: should this be written this way?
+    if writeback {
+        arm.regs[rn_idx] += offset;
+    }
+
+}
+
+fn ldr_imm(arm: &mut ArmCore, ins: ArmIns) {
+    single_data_load(arm, ins, |mem, addr| mem.read_word(addr), |_arm, ins| ins.slice(0, 12))
+}
+
+fn ldr_rot_reg(arm: &mut ArmCore, ins: ArmIns) {
+    single_data_load(arm, ins, |mem, addr| mem.read_word(addr),
+    |arm, ins| {
+        assert!(ins.reg(0) != REG_PC);
+        get_shifted_register(arm, ins, false)
+    })
+}
+
+fn ldrb_imm(arm: &mut ArmCore, ins: ArmIns) {
+    single_data_load(arm, ins, |mem, addr| mem.read_byte(addr) as u32, |_arm, ins| ins.slice(0, 12))
+}
+
+fn ldrb_rot_reg(arm: &mut ArmCore, ins: ArmIns) {
+    single_data_load(arm, ins, |mem, addr| mem.read_byte(addr) as u32,
+    |arm, ins| {
+        assert!(ins.reg(0) != REG_PC);
+        get_shifted_register(arm, ins, false)
+    })
+}
+
+fn single_data_store(arm: &mut ArmCore, ins: ArmIns, store_fn: impl Fn(&mut dyn Memory, u32, u32), offset_fn: impl Fn(&mut ArmCore, ArmIns) -> u32) {
+    let rd_idx = ins.reg(12);
+    let rn_idx = ins.reg(16);
+
+    let preindex = ins.flag(24);
+    let up = ins.flag(23);
+    let writeback = ins.flag(21);
+
+    assert!(!(rn_idx == REG_PC && writeback));
+    // post-index + writeback =  generate user address for privilege mode
+    let mode = arm.cpsr.mode;
+    if !preindex && writeback {
+        arm.switch_mode(OperatingMode::User);
+    }
+
+    let rn_value = arm.regs[rn_idx];
+    let rd_value = arm.regs[rd_idx];
+    let mut offset = offset_fn(arm, ins);
+
+    if !up {
+        offset = (offset as i32).wrapping_neg() as u32;
+    }
+
+    let addr = if preindex {
+        rn_value.wrapping_add(offset)
+    } else {
+        rn_value
+    };
+    store_fn(arm.memory, addr, rd_value);
+
+    if !preindex && writeback {
+        arm.switch_mode(mode);
+    }
+
+    // TODO: should this be written this way?
+    if writeback {
+        arm.regs[rn_idx] += offset;
+    }
+
+}
+
+fn str_imm(arm: &mut ArmCore, ins: ArmIns) {
+    single_data_store(arm, ins, |mem, addr, val| mem.write_word(addr, val), |_arm, ins| ins.slice(0, 12))
+}
+
+fn str_rot_reg(arm: &mut ArmCore, ins: ArmIns) {
+    single_data_store(arm, ins, |mem, addr, val| mem.write_word(addr, val),
+    |arm, ins| {
+        assert!(ins.reg(0) != REG_PC);
+        get_shifted_register(arm, ins, false)
+    })
+}
+
+fn strb_imm(arm: &mut ArmCore, ins: ArmIns) {
+    single_data_store(arm, ins, |mem, addr, val| mem.write_byte(addr, val as u8), |_arm, ins| ins.slice(0, 12))
+}
+
+fn strb_rot_reg(arm: &mut ArmCore, ins: ArmIns) {
+    single_data_store(arm, ins, |mem, addr, val| mem.write_byte(addr, val as u8),
+    |arm, ins| {
+        assert!(ins.reg(0) != REG_PC);
+        get_shifted_register(arm, ins, false)
+    })
 }
 
 fn block_data_transfer(arm: &mut ArmCore, ins: ArmIns) {
@@ -395,7 +529,7 @@ fn software_interrupt(arm: &mut ArmCore, ins: ArmIns) {
 
 struct ArmSpecs<'a>(Vec<IndexBitPair>, &'a str, ArmFn);
 
-impl<'a> ArmSpecs<'a> {
+impl ArmSpecs<'_> {
     fn try_match_discriminant(&self, disc: u32) -> Option<ArmFn> {
         if specs_matches(&self.0, disc) {
             Some(self.2)
@@ -405,7 +539,7 @@ impl<'a> ArmSpecs<'a> {
     }
 }
 
-struct ArmLookupTable {
+pub struct ArmLookupTable {
     disc2idx: Vec<u8>,
     idx2fn: Vec<ArmFn>,
 }
@@ -509,8 +643,8 @@ pub static ARM_PATTERN_TABLE: &[(&str, &str, ArmFn)] = &[
     ("0000 110S hhhh llll ssss 1001 mmmm", "SMULL<S> %Rl, %Rh, %Rm, %Rs", multiply_long),
     ("0000 111S hhhh llll ssss 1001 mmmm", "SMLAL<S> %Rl, %Rh, %Rm, %Rs", multiply_long),
 
-    ("0001 0000 nnnn dddd 0000 1001 mmmm", "SWP %Rd, %Rm [%Rn]", single_data_swap),
-    ("0001 0100 nnnn dddd 0000 1001 mmmm", "SWPB %Rd, %Rm [%Rn]", single_data_swap),
+    ("0001 0000 nnnn dddd 0000 1001 mmmm", "SWP %Rd, %Rm [%Rn]", swp),
+    ("0001 0100 nnnn dddd 0000 1001 mmmm", "SWPB %Rd, %Rm [%Rn]", swpb),
 
     ("0001 0010 1111 1111 1111 0001 nnnn", "BX %Rn", branch_and_exchange),
 
@@ -524,15 +658,16 @@ pub static ARM_PATTERN_TABLE: &[(&str, &str, ArmFn)] = &[
     ("000 P U1W1 nnnn dddd iiii 1111 iiii", "LDRSH %Rd, [%Rn, #[i]]", halfword_data_transfer),
     ("000 P U1W0 nnnn dddd iiii 1111 iiii", "STRH %Rd, [%Rn, #[i]]", halfword_data_transfer),
 
-    ("010 P U0W1 nnnn dddd oooo oooo oooo", "LDR %Rd, [%Rn, #offset[i]]", single_data_transfer),
-    ("011 P U0W1 nnnn dddd oooo oooo oooo", "LDR %Rd, [%Rn, <op2_reg>]", single_data_transfer),
-    ("010 P U1W1 nnnn dddd oooo oooo oooo", "LDRB %Rd, [%Rn, #offset[i]]", single_data_transfer),
-    ("011 P U1W1 nnnn dddd oooo oooo oooo", "LDRB %Rd, [%Rn, <op2_reg>]", single_data_transfer),
+    // single data transfer
+    ("010 P U0W1 nnnn dddd oooo oooo oooo", "LDR %Rd, [%Rn, #offset[i]]", ldr_imm),
+    ("011 P U0W1 nnnn dddd oooo oooo oooo", "LDR %Rd, [%Rn, <op2_reg>]", ldr_rot_reg),
+    ("010 P U1W1 nnnn dddd oooo oooo oooo", "LDRB %Rd, [%Rn, #offset[i]]", ldrb_imm),
+    ("011 P U1W1 nnnn dddd oooo oooo oooo", "LDRB %Rd, [%Rn, <op2_reg>]", ldrb_rot_reg),
 
-    ("010 P U0W0 nnnn dddd oooo oooo oooo", "STR %Rd, [%Rn, #offset[i]]", single_data_transfer),
-    ("011 P U0W0 nnnn dddd oooo oooo oooo", "STR %Rd, [%Rn, <op2_reg>]", single_data_transfer),
-    ("010 P U1W0 nnnn dddd oooo oooo oooo", "STRB %Rd, [%Rn, #offset[i]]", single_data_transfer),
-    ("011 P U1W0 nnnn dddd oooo oooo oooo", "STRB %Rd, [%Rn, <op2_reg>]", single_data_transfer),
+    ("010 P U0W0 nnnn dddd oooo oooo oooo", "STR %Rd, [%Rn, #offset[i]]", str_imm),
+    ("011 P U0W0 nnnn dddd oooo oooo oooo", "STR %Rd, [%Rn, <op2_reg>]", str_rot_reg),
+    ("010 P U1W0 nnnn dddd oooo oooo oooo", "STRB %Rd, [%Rn, #offset[i]]", strb_imm),
+    ("011 P U1W0 nnnn dddd oooo oooo oooo", "STRB %Rd, [%Rn, <op2_reg>]", strb_rot_reg),
 
     // Shouldn't occur
     // ("011 x xxxx xxxx xxxx xxxx xxx1 xxxx", "Undefined", |_: &mut ArmCore, _: ArmIns| {}),

@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate enum_primitive_derive;
 extern crate num_traits;
-
+extern crate log;
 
 #[macro_use]
 mod memory;
@@ -9,6 +9,8 @@ mod cpu;
 mod arm;
 use crate::arm::StatusRegister;
 use crate::arm::ArmCore;
+
+use std::env;
 
 struct Foo<'a> {
     x: &'a i32,
@@ -36,6 +38,8 @@ struct Point3d {
 
 
 fn main() {
+    env::set_var("RUST_LOG", "info");
+    env_logger::init();
     let x: usize = 15;
     let y: u32 = 15;
     println!("{}", x == (y as usize));

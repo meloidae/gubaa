@@ -9,3 +9,5 @@ authors = [ "meloidae <meloidaee@gmail.com>" ]
 rand="0.3.0"
 num-traits = {version = "*", default-features = false}
 enum-primitive-derive = "0.1.2"
+log = "0.4"
+env_logger = "0.7.1"
